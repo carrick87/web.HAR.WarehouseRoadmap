@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ice Breaker",
-  description: "Seminar ice breaker — scan, greet, and connect",
+  title: "D365 Warehouse Digitalisation Roadmap",
+  description:
+    "Interactive roadmap dashboard for D365 warehouse digitalisation — phases, kanban, metrics, and MoSCoW scope.",
 };
 
 export default function RootLayout({
@@ -26,11 +27,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
-        <Toaster richColors position="top-center" />
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
