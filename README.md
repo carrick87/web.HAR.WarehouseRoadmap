@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ice Breaker — Seminar Web App
 
-## Getting Started
+A real-time ice breaker for seminars. The speaker creates an event and shares a QR code. Attendees join, get a random number, pick someone else's number, and send a creative greeting. Results are shown with AI-ranked top greetings.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router)
+- **Supabase** (Postgres + Realtime)
+- **OpenAI** (creative greeting rankings via Vercel AI SDK)
+- **Tailwind CSS** + **shadcn/ui**
+
+## Setup
+
+### 1. Supabase
+
+1. Create a project at [supabase.com](https://supabase.com)
+2. Run the migration in `supabase/migrations/20250702000000_icebreaker.sql` via the SQL editor or CLI:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+supabase link --project-ref YOUR_PROJECT_REF
+supabase db push
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. Enable Realtime for `events`, `participants`, and `claims` (included in migration)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.local.example` to `.env.local` and fill in:
 
-## Learn More
+```bash
+cp .env.local.example .env.local
+```
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server only) |
+| `OPENAI_API_KEY` | OpenAI API key for greeting rankings |
+| `NEXT_PUBLIC_APP_URL` | App URL for QR codes (e.g. `http://localhost:3000`) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 3. Run locally
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run dev
+```
 
-## Deploy on Vercel
+Open [http://localhost:3000](http://localhost:3000)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## How it works
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Speaker** clicks "Start new event" → gets a host dashboard with QR code
+2. **Attendees** scan QR → enter name → receive a random number
+3. **Speaker** starts the event when ≥ 2 people have joined
+4. **Attendees** see shuffled, color-coded number boxes (not their own) and tap one
+5. They write a greeting; the box disappears for everyone else
+6. **5-minute timer** — when time runs out or everyone has greeted, results appear
+7. **AI ranks** the top 3 most creative greetings
+
+## Routes
+
+| Route | Purpose |
+|-------|---------|
+| `/` | Landing — create event |
+| `/host/[code]` | Speaker dashboard |
+| `/join/[code]` | Attendee flow |
+
+## Deploy
+
+Deploy to [Vercel](https://vercel.com) and set the same environment variables. Update `NEXT_PUBLIC_APP_URL` to your production domain so QR codes work correctly.
+
+## Version History
+
+### v0.2.0 (Current)
+
+- Ice Breaker seminar app with host dashboard, QR join flow, and attendee greeting UI
+- Supabase schema, Realtime updates, and API routes for events, participants, and claims
+- OpenAI-powered ranking of top creative greetings
+- shadcn/ui components, theming, and Tailwind styling
+
+### v0.1.0
+
+- Initial Next.js app scaffold
