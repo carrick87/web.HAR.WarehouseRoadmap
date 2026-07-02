@@ -5,9 +5,13 @@ import {
   Plus, Trash2, Edit2, Check, CheckSquare, Square, 
   ArrowRight, Award, ShieldAlert, BarChart3, ListTodo, 
   Calendar, RotateCcw, Download, Upload, Move, Info,
-  TrendingUp, Layers, CheckCircle2, Circle, AlertCircle, Moon, Sun
+  TrendingUp, Layers, CheckCircle2, Circle, AlertCircle, Moon, Sun,
+  CloudUpload, CloudDownload, Loader2
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { normalizeSlug, type Deliverable, type DeliverableStatus, type MoscowLevel, type Phase, type ProjectData } from '@/lib/roadmap-types';
+
+const PROJECT_SLUG_KEY = 'd365_project_slug';
 
 // Default initial state matching the uploaded roadmap diagram
 const INITIAL_DATA = {
@@ -118,11 +122,9 @@ const INITIAL_DATA = {
     { id: "dep-2", text: "Finalisation of DOT fields", checked: false },
     { id: "dep-3", text: "Business process approval (F&A, SMM, KK)", checked: false }
   ]
-};
+} as ProjectData;
 
-type ProjectData = typeof INITIAL_DATA;
-type Phase = ProjectData["phases"][number];
-type Deliverable = Phase["deliverables"][number];
+const INITIAL_PROJECT = INITIAL_DATA;
 
 const KANBAN_STAGES = ["Backlog", "Ready", "In Progress", "User Testing", "Done"] as const;
 const MOSCOW_LEVELS = ["Must Have", "Should Have", "Could Have"] as const;
@@ -130,9 +132,9 @@ const MOSCOW_LEVELS = ["Must Have", "Should Have", "Could Have"] as const;
 export function RoadmapDashboard() {
   const { theme, setTheme } = useTheme();
   const [projectData, setProjectData] = useState<ProjectData>(() => {
-    if (typeof window === "undefined") return INITIAL_DATA;
+    if (typeof window === "undefined") return INITIAL_PROJECT;
     const local = localStorage.getItem('d365_project_data');
-    return local ? (JSON.parse(local) as ProjectData) : INITIAL_DATA;
+    return local ? (JSON.parse(local) as ProjectData) : INITIAL_PROJECT;
   });
   
   const [activeTab, setActiveTab] = useState<"roadmap" | "kanban" | "metrics">("roadmap");
@@ -144,10 +146,23 @@ export function RoadmapDashboard() {
   // Deliverable editing state
   const [editingDeliverableId, setEditingDeliverableId] = useState<string | null>(null);
   const [editingDelName, setEditingDelName] = useState("");
-  const [editingDelMoscow, setEditingDelMoscow] = useState("Must Have");
-  const [editingDelStatus, setEditingDelStatus] = useState("Backlog");
+  const [editingDelMoscow, setEditingDelMoscow] = useState<MoscowLevel>("Must Have");
+  const [editingDelStatus, setEditingDelStatus] = useState<DeliverableStatus>("Backlog");
   const [newDeliverableText, setNewDeliverableText] = useState("");
-  const [newDeliverableMoscow, setNewDeliverableMoscow] = useState("Must Have");
+  const [newDeliverableMoscow, setNewDeliverableMoscow] = useState<MoscowLevel>("Must Have");
+  const [projectSlug, setProjectSlug] = useState("d365-warehouse");
+  const [cloudStatus, setCloudStatus] = useState<"idle" | "saving" | "loading" | "saved" | "error">("idle");
+  const [cloudMessage, setCloudMessage] = useState("");
+  const [lastCloudSaveAt, setLastCloudSaveAt] = useState<string | null>(null);
+  const [cloudBaseline, setCloudBaseline] = useState<string | null>(null);
+
+  useEffect(() => {
+    const savedSlug = localStorage.getItem(PROJECT_SLUG_KEY);
+    if (savedSlug) setProjectSlug(savedSlug);
+  }, []);
+
+  const cloudDirty =
+    cloudBaseline !== null && JSON.stringify(projectData) !== cloudBaseline;
 
   // Save to local storage on change
   useEffect(() => {
@@ -157,9 +172,9 @@ export function RoadmapDashboard() {
   // Reset function
   const handleReset = () => {
     if (window.confirm("Are you sure you want to restore the default project roadmap data? All edits will be overwritten.")) {
-      setProjectData(INITIAL_DATA);
-      setEditedTitle(INITIAL_DATA.projectTitle);
-      setEditedObjective(INITIAL_DATA.projectObjective);
+      setProjectData(INITIAL_PROJECT);
+      setEditedTitle(INITIAL_PROJECT.projectTitle);
+      setEditedObjective(INITIAL_PROJECT.projectObjective);
     }
   };
 
@@ -195,6 +210,83 @@ export function RoadmapDashboard() {
           alert("Error parsing file.");
         }
       };
+    }
+  };
+
+  const handleSaveToCloud = async () => {
+    const slug = normalizeSlug(projectSlug);
+    if (!slug) {
+      setCloudStatus("error");
+      setCloudMessage("Enter a valid project code (letters, numbers, hyphens).");
+      return;
+    }
+
+    setCloudStatus("saving");
+    setCloudMessage("Saving to Supabase…");
+
+    try {
+      const response = await fetch(`/api/roadmap/${encodeURIComponent(slug)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: projectData }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Save failed (${response.status})`);
+      }
+
+      const saved = (await response.json()) as { updated_at: string };
+      localStorage.setItem(PROJECT_SLUG_KEY, slug);
+      setProjectSlug(slug);
+      setCloudBaseline(JSON.stringify(projectData));
+      setLastCloudSaveAt(saved.updated_at);
+      setCloudStatus("saved");
+      setCloudMessage("Progress saved to cloud.");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage(error instanceof Error ? error.message : "Could not save to cloud.");
+    }
+  };
+
+  const handleLoadFromCloud = async () => {
+    const slug = normalizeSlug(projectSlug);
+    if (!slug) {
+      setCloudStatus("error");
+      setCloudMessage("Enter a valid project code to load.");
+      return;
+    }
+
+    if (
+      cloudDirty &&
+      !window.confirm("Local edits are not saved to the cloud yet. Load cloud data anyway?")
+    ) {
+      return;
+    }
+
+    setCloudStatus("loading");
+    setCloudMessage("Loading from Supabase…");
+
+    try {
+      const response = await fetch(`/api/roadmap/${encodeURIComponent(slug)}`);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Load failed (${response.status})`);
+      }
+
+      const row = (await response.json()) as { data: ProjectData; updated_at: string };
+      setProjectData(row.data);
+      setEditedTitle(row.data.projectTitle);
+      setEditedObjective(row.data.projectObjective);
+      localStorage.setItem(PROJECT_SLUG_KEY, slug);
+      setProjectSlug(slug);
+      setCloudBaseline(JSON.stringify(row.data));
+      setLastCloudSaveAt(row.updated_at);
+      setCloudStatus("saved");
+      setCloudMessage("Loaded cloud progress.");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage(error instanceof Error ? error.message : "Could not load from cloud.");
     }
   };
 
@@ -265,7 +357,7 @@ export function RoadmapDashboard() {
   // Add deliverable to phase
   const addDeliverable = (phaseId: string) => {
     if (!newDeliverableText.trim()) return;
-    const newDel = {
+    const newDel: Deliverable = {
       id: `del-custom-${Date.now()}`,
       name: newDeliverableText.trim(),
       status: "Backlog",
@@ -451,6 +543,44 @@ export function RoadmapDashboard() {
 
         {/* Global Controls */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800/80">
+            <span className="text-slate-400 uppercase tracking-wider text-[10px] font-bold">Project</span>
+            <input
+              type="text"
+              value={projectSlug}
+              onChange={(e) => setProjectSlug(e.target.value)}
+              className="bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded border border-slate-600 w-36 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="d365-warehouse"
+            />
+          </div>
+
+          <button
+            onClick={handleSaveToCloud}
+            disabled={cloudStatus === "saving" || cloudStatus === "loading"}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 border border-emerald-600 text-white rounded-lg transition-all"
+            title="Save current progress to Supabase"
+          >
+            {cloudStatus === "saving" ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CloudUpload className="w-4 h-4" />
+            )}
+            <span>Save progress</span>
+          </button>
+
+          <button
+            onClick={handleLoadFromCloud}
+            disabled={cloudStatus === "saving" || cloudStatus === "loading"}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 text-slate-200 rounded-lg transition-all"
+            title="Load saved progress from Supabase"
+          >
+            {cloudStatus === "loading" ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CloudDownload className="w-4 h-4 text-sky-400" />
+            )}
+            <span>Load cloud</span>
+          </button>
 
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -500,6 +630,17 @@ export function RoadmapDashboard() {
             </span>
           </div>
           <span className="text-xs text-slate-600 dark:text-slate-300 font-bold hidden sm:inline">Overall Roadmap Execution</span>
+          {(cloudDirty || cloudMessage || lastCloudSaveAt) && (
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 sm:text-right">
+              {cloudDirty && <span className="text-amber-600 dark:text-amber-400 font-semibold">Unsaved cloud changes · </span>}
+              {cloudMessage && <span>{cloudMessage} </span>}
+              {lastCloudSaveAt && (
+                <span>
+                  Last cloud save: {new Date(lastCloudSaveAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Navigation Tabs */}
@@ -717,7 +858,7 @@ export function RoadmapDashboard() {
                           />
                           <select 
                             value={newDeliverableMoscow} 
-                            onChange={(e) => setNewDeliverableMoscow(e.target.value)}
+                            onChange={(e) => setNewDeliverableMoscow(e.target.value as MoscowLevel)}
                             className="text-xs px-2 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                           >
                             {MOSCOW_LEVELS.map(level => (
@@ -759,7 +900,7 @@ export function RoadmapDashboard() {
                                       <div className="flex gap-2">
                                         <select 
                                           value={editingDelMoscow} 
-                                          onChange={(e) => setEditingDelMoscow(e.target.value)}
+                                          onChange={(e) => setEditingDelMoscow(e.target.value as MoscowLevel)}
                                           className="text-xs px-2 py-1.5 border border-slate-300 rounded bg-white"
                                         >
                                           {MOSCOW_LEVELS.map(l => (
@@ -768,7 +909,7 @@ export function RoadmapDashboard() {
                                         </select>
                                         <select 
                                           value={editingDelStatus} 
-                                          onChange={(e) => setEditingDelStatus(e.target.value)}
+                                          onChange={(e) => setEditingDelStatus(e.target.value as DeliverableStatus)}
                                           className="text-xs px-2 py-1.5 border border-slate-300 rounded bg-white"
                                         >
                                           {KANBAN_STAGES.map(s => (
@@ -1238,7 +1379,7 @@ export function RoadmapDashboard() {
         </div>
         <div className="flex gap-4">
           <span className="text-slate-500 dark:text-slate-400 dark:text-slate-500">Double click values to change status</span>
-          <span className="text-slate-500 dark:text-slate-400 dark:text-slate-500">Auto-saves locally</span>
+          <span className="text-slate-500 dark:text-slate-400">Auto-saves locally · cloud save via Supabase</span>
         </div>
       </footer>
     </div>
